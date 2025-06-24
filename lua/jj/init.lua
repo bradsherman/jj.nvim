@@ -14,7 +14,7 @@ M.config = {
 }
 
 --- Setup the plugin
---- @param opts table: Options to configure the plugin
+--- @param opts jj.Config: Options to configure the plugin
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
 	cmd.register_command()

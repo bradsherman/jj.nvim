@@ -15,6 +15,15 @@ local state = {
 	job_id = nil,
 }
 
+--- Close the current terminal buffer if it exists
+local function close_terminal_buffer()
+	if state.terminal_buf and vim.api.nvim_buf_is_valid(state.terminal_buf) then
+		vim.cmd("bwipeout! " .. state.terminal_buf)
+	else
+		vim.cmd("close")
+	end
+end
+
 --- Execute jj describe command with the given description
 ---@param description string The description text
 local function execute_describe(description)
@@ -32,15 +41,30 @@ local function execute_describe(description)
 	end
 end
 
+--- @class jj.cmd.describe_opts
+--- @field with_status boolean: Whether or not `jj st` should be displayed in a buffer while describing the commit
+
+--- @type jj.cmd.describe_opts
+local default_describe_opts = {
+	with_status = true,
+}
+
 --- Jujutsu describe
----@param description string|nil Optional description text
-function M.describe(description)
+---@param description? string Optional description text
+---@param opts? jj.cmd.describe_opts Optional command options
+function M.describe(description, opts)
 	if not utils.ensure_jj() then
 		return
 	end
 
 	-- Check if a description was provided otherwise require for input
 	if not description then
+		local merged_opts = vim.tbl_deep_extend("force", default_describe_opts, opts or {})
+		if merged_opts.with_status then
+			-- Show the status in a terminal buffer
+			M.status()
+		end
+
 		vim.ui.input({
 			prompt = "Description: ",
 			default = "",
@@ -49,6 +73,8 @@ function M.describe(description)
 			if input then
 				execute_describe(input)
 			end
+			-- Close the current terminal when finished
+			close_terminal_buffer()
 		end)
 	end
 end
@@ -91,8 +117,11 @@ function M.edit()
 				return
 			end
 
-			-- Otherwise update the log window
+			-- If ok update the log window
 			M.log({})
+		else
+			-- If user exited without saving discard the log
+			close_terminal_buffer()
 		end
 	end)
 end
@@ -104,8 +133,10 @@ function M.squash()
 	end
 
 	local cmd = "jj squash"
-	utils.execute_command(cmd, "Failed to squash")
-	utils.notify("Command `squash` was succesful.", vim.log.levels.INFO)
+	local _, success = utils.execute_command(cmd, "Failed to squash")
+	if success then
+		utils.notify("Command `squash` was succesful.", vim.log.levels.INFO)
+	end
 end
 
 ---@class jj.cmd.log_opts
@@ -190,6 +221,10 @@ function M.show_output_in_terminal(cmd)
 	if state.chan then
 		vim.fn.chanclose(state.chan)
 	end
+	-- If there was a previous job stop it
+	if state.job_id then
+		vim.fn.jobstop(state.job_id)
+	end
 
 	-- For sure it's set to a terminal buffer
 	--- @type integer
@@ -252,20 +287,13 @@ function M.show_output_in_terminal(cmd)
 	end
 
 	-- Set keymaps to close and wipe buffer
-	local function close_and_wipe()
-		if vim.api.nvim_buf_is_valid(buf) then
-			vim.cmd("bwipeout! " .. buf)
-		else
-			vim.cmd("close")
-		end
-	end
 
 	-- Avoid the user being able to go in insert mode for this buffer
 	vim.keymap.set("n", "i", function() end, { buffer = buf, noremap = true, silent = true })
 
 	-- Set keymaps for closing the terminal buffer
-	vim.keymap.set("n", "q", close_and_wipe, { buffer = buf, noremap = true, silent = true })
-	vim.keymap.set("n", "<ESC>", close_and_wipe, { buffer = buf, noremap = true, silent = true })
+	vim.keymap.set("n", "q", close_terminal_buffer, { buffer = buf, noremap = true, silent = true })
+	vim.keymap.set("n", "<ESC>", close_terminal_buffer, { buffer = buf, noremap = true, silent = true })
 
 	-- Start in normal mode
 	vim.cmd("stopinsert")
@@ -273,9 +301,9 @@ function M.show_output_in_terminal(cmd)
 	--- Watch for buffer close events to clean up terminal buffer from the state
 	vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
 		buffer = buf,
-		callback = function(args)
+		callback = function(_)
 			-- Clear the terminal buffer
-			if state.terminal_buf and args.buf == state.terminal_buf then
+			if state.terminal_buf and vim.api.nvim_buf_is_valid(state.terminal_buf) then
 				state.terminal_buf = nil
 			end
 
