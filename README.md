@@ -8,12 +8,14 @@ A Neovim plugin for [Jujutsu (jj)](https://github.com/jj-vcs/jj) version control
 
 This plugin aims to be something like vim-fugitive but for piloting the jj-vcs CLI. The goal is to eventually provide features similar to git status, diffs, and pickers for managing Jujutsu repositories directly from Neovim.
 
+https://github.com/nicolasgb/assets/demo.mp4
+
 ## Current Features
 
 - Basic jj command execution through `:J` command
 - Terminal-based output display for jj commands
 - Support jj subcommands including your aliases through the cmdline.
-- Native lua calls for the following jj subcommands:
+- First class citizens with ui integration
   - `describe` - Set change descriptions
   - `status` / `st` - Show repository status
   - `log` - Display log history with configurable options
@@ -71,6 +73,11 @@ The plugin provides a `:J` command that accepts jj subcommands:
       }
     end, { desc = "JJ log" })
 
+    -- This is an alias i use for moving bookmarks its so good
+    vim.keymap.set("n", "<leader>jt", function()
+      cmd.j "tug"
+      cmd.log {}
+    end, { desc = "JJ tug" })
   end,
 }
 

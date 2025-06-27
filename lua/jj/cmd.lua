@@ -25,183 +25,10 @@ local function close_terminal_buffer()
 	end
 end
 
---- Execute jj describe command with the given description
----@param description string The description text
-local function execute_describe(description)
-	if not description or description == "" then
-		utils.notify("Description cannot be empty", vim.log.levels.ERROR)
-		return
-	end
-
-	local cmd = string.format("jj describe -m '%s'", description)
-	local _, success = utils.execute_command(cmd, "Failed to describe")
-	if not success then
-		return
-	else
-		utils.notify("Description set.", vim.log.levels.INFO)
-	end
-end
-
---- @class jj.cmd.describe_opts
---- @field with_status boolean: Whether or not `jj st` should be displayed in a buffer while describing the commit
-
---- @type jj.cmd.describe_opts
-local default_describe_opts = {
-	with_status = true,
-}
-
---- Jujutsu describe
----@param description? string Optional description text
----@param opts? jj.cmd.describe_opts Optional command options
-function M.describe(description, opts)
-	if not utils.ensure_jj() then
-		return
-	end
-
-	-- Check if a description was provided otherwise require for input
-	if not description then
-		local merged_opts = vim.tbl_deep_extend("force", default_describe_opts, opts or {})
-		if merged_opts.with_status then
-			-- Show the status in a terminal buffer
-			M.status()
-		end
-
-		vim.ui.input({
-			prompt = "Description: ",
-			default = "",
-		}, function(input)
-			-- If the user inputed something, execute the describe command
-			if input then
-				execute_describe(input)
-			end
-			-- Close the current terminal when finished
-			close_terminal_buffer()
-		end)
-	end
-end
-
---- Jujutsu status
-function M.status()
-	if not utils.ensure_jj() then
-		return
-	end
-
-	local cmd = "jj st"
-	M.show_output_in_terminal(cmd)
-end
-
---- Jujutsu new
-function M.new()
-	if not utils.ensure_jj() then
-		return
-	end
-
-	local cmd = "jj new"
-	utils.execute_command(cmd, "Failed to create new")
-	utils.notify("Command `new` was succesful.", vim.log.levels.INFO)
-end
-
--- Jujutsu edit
-function M.edit()
-	if not utils.ensure_jj() then
-		return
-	end
-	M.log({})
-	vim.ui.input({
-		prompt = "Change to edit: ",
-		default = "",
-	}, function(input)
-		-- If the user inputed something, execute the describe command
-		if input then
-			local _, success = utils.execute_command(string.format("jj edit %s", input), "Error editing change")
-			if not success then
-				return
-			end
-
-			-- If ok update the log window
-			M.log({})
-		else
-			-- If user exited without saving discard the log
-			close_terminal_buffer()
-		end
-	end)
-end
-
---- Jujutsu squash
-function M.squash()
-	if not utils.ensure_jj() then
-		return
-	end
-
-	local cmd = "jj squash"
-	local _, success = utils.execute_command(cmd, "Failed to squash")
-	if success then
-		utils.notify("Command `squash` was succesful.", vim.log.levels.INFO)
-	end
-end
-
----@class jj.cmd.log_opts
----@field summary? boolean: Show a summary of the log
----@field reversed? boolean: Show the log in reverse order
----@field no_graph? boolean: Do not show the graph in the log output
----@field limit? uinteger : Limit the number of log entries shown, defaults to 20 if not provided
----@field revisions? string: Which revisions to show
-
---- @type jj.cmd.log_opts
-local default_log_opts = {
-	--- @type boolean
-	summary = false,
-	--- @type boolean
-	reversed = false,
-	--- @type boolean
-	no_graph = false,
-	--- @type uinteger
-	limit = 20,
-}
---- Jujutsu log
----@param opts jj.cmd.log_opts Command options from nvim_create_user_command
-function M.log(opts)
-	if not utils.ensure_jj() then
-		return
-	end
-
-	local cmd = "jj log"
-
-	-- Merge default options with provided ones
-	local merged_opts = vim.tbl_extend("force", default_log_opts, opts or {})
-
-	-- Add options to the command
-	for key, value in pairs(merged_opts) do
-		-- Replace _ with - for command line options
-		key = key:gsub("_", "-")
-
-		-- Handle special cases such as limit
-		if key == "limit" and value then
-			cmd = string.format("%s --%s %d", cmd, key, value)
-		elseif key == "revisions" and value then
-			cmd = string.format("%s --%s %s", cmd, key, value)
-		elseif value then
-			-- Simply append the option
-			cmd = string.format("%s --%s", cmd, key)
-		end
-	end
-
-	M.show_output_in_terminal(cmd)
-end
-
---- Jujutsu diff
-function M.diff()
-	if not utils.ensure_jj() then
-		return
-	end
-
-	local cmd = "jj diff"
-	M.show_output_in_terminal(cmd)
-end
-
 --- Run a command and show it's output in a terminal buffer
+--- If a previous command already existed it smartly reuses the buffer cleaning the previous output
 ---@param cmd string
-function M.show_output_in_terminal(cmd)
+local function run(cmd)
 	-- Clean up previous state if invalid
 	if state.buf and not vim.api.nvim_buf_is_valid(state.buf) then
 		state.buf = nil
@@ -221,7 +48,7 @@ function M.show_output_in_terminal(cmd)
 		state.chan = nil
 	end
 
-	local buf, win
+	local win
 	if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
 		-- Find or create a window for the buffer
 		local buf_wins = vim.fn.win_findbuf(state.buf)
@@ -325,18 +152,196 @@ function M.show_output_in_terminal(cmd)
 	end
 end
 
---- Handle J command with subcommands and direct jj passthrough
----@param opts table Command options from nvim_create_user_command
-function M.handle_j_command(opts)
+--- Execute jj describe command with the given description
+---@param description string The description text
+local function execute_describe(description)
+	if not description or description == "" then
+		utils.notify("Description cannot be empty", vim.log.levels.ERROR)
+		return
+	end
+
+	local cmd = string.format("jj describe -m '%s'", description)
+	local _, success = utils.execute_command(cmd, "Failed to describe")
+	if not success then
+		return
+	else
+		utils.notify("Description set.", vim.log.levels.INFO)
+	end
+end
+
+--- @class jj.cmd.describe_opts
+--- @field with_status boolean: Whether or not `jj st` should be displayed in a buffer while describing the commit
+
+--- @type jj.cmd.describe_opts
+local default_describe_opts = {
+	with_status = true,
+}
+
+--- Jujutsu describe
+---@param description? string Optional description text
+---@param opts? jj.cmd.describe_opts Optional command options
+function M.describe(description, opts)
 	if not utils.ensure_jj() then
 		return
 	end
 
-	local args = opts.fargs
+	-- Check if a description was provided otherwise require for input
+	if not description then
+		local merged_opts = vim.tbl_deep_extend("force", default_describe_opts, opts or {})
+		if merged_opts.with_status then
+			-- Show the status in a terminal buffer
+			M.status()
+		end
+
+		vim.ui.input({
+			prompt = "Description: ",
+			default = "",
+		}, function(input)
+			-- If the user inputed something, execute the describe command
+			if input then
+				execute_describe(input)
+			end
+			-- Close the current terminal when finished
+			close_terminal_buffer()
+		end)
+	end
+end
+
+--- Jujutsu status
+function M.status()
+	if not utils.ensure_jj() then
+		return
+	end
+
+	local cmd = "jj st"
+	run(cmd)
+end
+
+--- Jujutsu new
+function M.new()
+	if not utils.ensure_jj() then
+		return
+	end
+
+	local cmd = "jj new"
+	utils.execute_command(cmd, "Failed to create new")
+	utils.notify("Command `new` was succesful.", vim.log.levels.INFO)
+end
+
+-- Jujutsu edit
+function M.edit()
+	if not utils.ensure_jj() then
+		return
+	end
+	M.log({})
+	vim.ui.input({
+		prompt = "Change to edit: ",
+		default = "",
+	}, function(input)
+		-- If the user inputed something, execute the describe command
+		if input then
+			local _, success = utils.execute_command(string.format("jj edit %s", input), "Error editing change")
+			if not success then
+				return
+			end
+
+			-- If ok update the log window
+			M.log({})
+		else
+			-- If user exited without saving discard the log
+			close_terminal_buffer()
+		end
+	end)
+end
+
+--- Jujutsu squash
+function M.squash()
+	if not utils.ensure_jj() then
+		return
+	end
+
+	local cmd = "jj squash"
+	local _, success = utils.execute_command(cmd, "Failed to squash")
+	if success then
+		utils.notify("Command `squash` was succesful.", vim.log.levels.INFO)
+	end
+end
+
+---@class jj.cmd.log_opts
+---@field summary? boolean: Show a summary of the log
+---@field reversed? boolean: Show the log in reverse order
+---@field no_graph? boolean: Do not show the graph in the log output
+---@field limit? uinteger : Limit the number of log entries shown, defaults to 20 if not provided
+---@field revisions? string: Which revisions to show
+
+--- @type jj.cmd.log_opts
+local default_log_opts = {
+	--- @type boolean
+	summary = false,
+	--- @type boolean
+	reversed = false,
+	--- @type boolean
+	no_graph = false,
+	--- @type uinteger
+	limit = 20,
+}
+--- Jujutsu log
+---@param opts jj.cmd.log_opts Command options from nvim_create_user_command
+function M.log(opts)
+	if not utils.ensure_jj() then
+		return
+	end
+
+	local cmd = "jj log"
+
+	-- Merge default options with provided ones
+	local merged_opts = vim.tbl_extend("force", default_log_opts, opts or {})
+
+	-- Add options to the command
+	for key, value in pairs(merged_opts) do
+		-- Replace _ with - for command line options
+		key = key:gsub("_", "-")
+
+		-- Handle special cases such as limit
+		if key == "limit" and value then
+			cmd = string.format("%s --%s %d", cmd, key, value)
+		elseif key == "revisions" and value then
+			cmd = string.format("%s --%s %s", cmd, key, value)
+		elseif value then
+			-- Simply append the option
+			cmd = string.format("%s --%s", cmd, key)
+		end
+	end
+
+	run(cmd)
+end
+
+--- Jujutsu diff
+function M.diff()
+	if not utils.ensure_jj() then
+		return
+	end
+
+	local cmd = "jj diff"
+	run(cmd)
+end
+
+--- @param args string|string[] jj command arguments
+function M.j(args)
+	if not utils.ensure_jj() then
+		return
+	end
+
 	if #args == 0 then
 		-- Use the user's default command and do not try to parse anythng else
-		M.show_output_in_terminal("jj")
+		run("jj")
 		return
+	end
+
+	-- Check if args is a string
+	if type(args) == "string" then
+		-- Split the string into a table of arguments
+		args = vim.split(args, "%s+")
 	end
 
 	local subcommand = args[1]
@@ -350,25 +355,29 @@ function M.handle_j_command(opts)
 		local description = table.concat(remaining_args, " ")
 		M.describe(description ~= "" and description or nil)
 		return
-	elseif subcommand == "edit" then
+	elseif subcommand == "edit" and #remaining_args == 0 then
 		M.edit()
 		return
 	elseif subcommand == "new" then
-		local _, success = utils.execute_command(cmd, "Failed to edit change")
-		if not success then
-			return
-		end
-
+		M.new()
 		M.log({})
+		return
 	end
 
 	-- Run the command in the terminal
-	M.show_output_in_terminal(cmd)
+	run(cmd)
+end
+
+--- Handle J command with subcommands and direct jj passthrough
+---@param opts table Command options from nvim_create_user_command
+local function handle_j_command(opts)
+	local args = opts.fargs
+	M.j(args)
 end
 
 --- Register the J command
 function M.register_command()
-	vim.api.nvim_create_user_command("J", M.handle_j_command, {
+	vim.api.nvim_create_user_command("J", handle_j_command, {
 		nargs = "*",
 		complete = function(arglead, _, _)
 			-- Basic completion for common jj subcommands
