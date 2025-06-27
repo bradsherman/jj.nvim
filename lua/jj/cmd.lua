@@ -6,7 +6,8 @@ local utils = require("jj.utils")
 local state = {
 	-- The current terminal buffer for jj commands
 	--- @type integer|nil
-	terminal_buf = nil,
+	buf = nil,
+
 	-- The current channel to communciate with the terminal
 	--- @type integer|nil
 	chan = nil,
@@ -17,8 +18,8 @@ local state = {
 
 --- Close the current terminal buffer if it exists
 local function close_terminal_buffer()
-	if state.terminal_buf and vim.api.nvim_buf_is_valid(state.terminal_buf) then
-		vim.cmd("bwipeout! " .. state.terminal_buf)
+	if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+		vim.cmd("bwipeout! " .. state.buf)
 	else
 		vim.cmd("close")
 	end
@@ -201,49 +202,58 @@ end
 --- Run a command and show it's output in a terminal buffer
 ---@param cmd string
 function M.show_output_in_terminal(cmd)
-	if state.terminal_buf and state.chan then
-		-- If we already have a terminal buffer, just switch to it
-		vim.api.nvim_set_current_buf(state.terminal_buf)
-		-- Send ansi escape sequence to clear the terminal
-		vim.api.nvim_chan_send(state.chan, "\27[H\27[2J")
-	else
-		-- Split window and create buffer
-		vim.cmd("split")
-		-- Otherwise, create a new terminal buffer and store it in the state
-		local win = vim.api.nvim_get_current_win()
-		local buf = vim.api.nvim_create_buf(false, true)
-
-		state.terminal_buf = buf
-		vim.api.nvim_win_set_buf(win, buf)
+	-- Clean up previous state if invalid
+	if state.buf and not vim.api.nvim_buf_is_valid(state.buf) then
+		state.buf = nil
+		state.chan = nil
+		state.job_id = nil
 	end
 
-	-- If there was a previous channel with a terminal close it
-	if state.chan then
-		vim.fn.chanclose(state.chan)
-	end
-	-- If there was a previous job stop it
+	-- Stop any running job first
 	if state.job_id then
 		vim.fn.jobstop(state.job_id)
+		state.job_id = nil
 	end
 
-	-- For sure it's set to a terminal buffer
-	--- @type integer
-	local buf = state.terminal_buf
-	local win = vim.api.nvim_get_current_win()
+	-- Close previous channel
+	if state.chan then
+		vim.fn.chanclose(state.chan)
+		state.chan = nil
+	end
 
-	-- Set buffer options
-	vim.bo[buf].bufhidden = "wipe"
+	local buf, win
+	if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+		-- Find or create a window for the buffer
+		local buf_wins = vim.fn.win_findbuf(state.buf)
+		if #buf_wins > 0 then
+			vim.api.nvim_set_current_win(buf_wins[1])
+			win = buf_wins[1]
+		else
+			vim.cmd("split")
+			win = vim.api.nvim_get_current_win()
+			vim.api.nvim_win_set_buf(win, state.buf)
+		end
+	else
+		-- Create new terminal buffer
+		vim.cmd("split")
+		win = vim.api.nvim_get_current_win()
+		state.buf = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_win_set_buf(win, state.buf)
 
-	-- Create a terminal job that runs the command and exits
-	--- @type integer
-	local chan = vim.api.nvim_open_term(buf, {})
+		-- Set buffer options only once
+		vim.bo[state.buf].bufhidden = "wipe"
+	end
+
+	-- Create new terminal channel
+	local chan = vim.api.nvim_open_term(state.buf, {})
 	if not chan or chan <= 0 then
 		vim.notify("Failed to create terminal channel", vim.log.levels.ERROR)
 		return
 	end
-
-	-- Set it in the state to close it later
 	state.chan = chan
+
+	-- Clear terminal before running new command
+	vim.api.nvim_chan_send(chan, "\27[H\27[2J")
 
 	local jid = vim.fn.jobstart(cmd, {
 		pty = true,
@@ -256,69 +266,63 @@ function M.show_output_in_terminal(cmd)
 			COLORTERM = "truecolor",
 		},
 		on_stdout = function(_, data)
-			if not vim.api.nvim_buf_is_valid(buf) then
+			if not vim.api.nvim_buf_is_valid(state.buf) or not state.chan then
 				return
 			end
-			-- Send output directly to the terminal
-			local ouptut = table.concat(data, "\n")
-			vim.api.nvim_chan_send(chan, ouptut)
+			local output = table.concat(data, "\n")
+			vim.api.nvim_chan_send(state.chan, output)
 		end,
 		on_exit = function(_, _)
-			if vim.api.nvim_buf_is_valid(buf) then
-				-- Once the job exits, we can set the buffer to be non-modifiable
-				vim.bo[buf].modifiable = false
-
-				-- Switch to normal mode after command completes
-				vim.schedule(function()
-					if vim.api.nvim_get_current_buf() == buf then
+			vim.schedule(function()
+				if vim.api.nvim_buf_is_valid(state.buf) then
+					vim.bo[state.buf].modifiable = false
+					if vim.api.nvim_get_current_buf() == state.buf then
 						vim.cmd("stopinsert")
 					end
-				end)
-			end
+				end
+			end)
 		end,
 	})
 
-	-- TODO: HANDLE ERRORS BETTER
 	if jid <= 0 then
 		vim.api.nvim_chan_send(chan, "Failed to start command: " .. cmd .. "\r\n")
+		state.chan = nil
 	else
-		-- Store the job ID in the state for later reference
 		state.job_id = jid
 	end
 
-	-- Set keymaps to close and wipe buffer
+	-- Set keymaps only if they haven't been set for this buffer
+	if not vim.b[state.buf].jj_keymaps_set then
+		vim.keymap.set({ "n", "v" }, "i", function() end, { buffer = state.buf, noremap = true, silent = true })
+		vim.keymap.set({ "n", "v" }, "c", function() end, { buffer = state.buf, noremap = true, silent = true })
+		vim.keymap.set({ "n", "v" }, "a", function() end, { buffer = state.buf, noremap = true, silent = true })
+		vim.keymap.set({ "n", "v" }, "q", close_terminal_buffer, { buffer = state.buf, noremap = true, silent = true })
+		vim.keymap.set({ "n" }, "<ESC>", close_terminal_buffer, { buffer = state.buf, noremap = true, silent = true })
+		vim.b[state.buf].jj_keymaps_set = true
+	end
 
-	-- Avoid the user being able to go in insert mode for this buffer
-	vim.keymap.set("n", "i", function() end, { buffer = buf, noremap = true, silent = true })
-
-	-- Set keymaps for closing the terminal buffer
-	vim.keymap.set("n", "q", close_terminal_buffer, { buffer = buf, noremap = true, silent = true })
-	vim.keymap.set("n", "<ESC>", close_terminal_buffer, { buffer = buf, noremap = true, silent = true })
-
-	-- Start in normal mode
 	vim.cmd("stopinsert")
 
-	--- Watch for buffer close events to clean up terminal buffer from the state
-	vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
-		buffer = buf,
-		callback = function(_)
-			-- Clear the terminal buffer
-			if state.terminal_buf and vim.api.nvim_buf_is_valid(state.terminal_buf) then
-				state.terminal_buf = nil
-			end
-
-			--- Clear the channel
-			if state.chan then
-				vim.fn.chanclose(state.chan)
-			end
-
-			-- Clear the job since the terminal is closed
-			if state.job_id then
-				vim.fn.jobstop(state.job_id)
-				state.job_id = nil
-			end
-		end,
-	})
+	-- Set up cleanup autocmd only once per buffer
+	if not vim.b[state.buf].jj_cleanup_set then
+		vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+			buffer = state.buf,
+			callback = function()
+				if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
+					state.buf = nil
+				end
+				if state.chan then
+					vim.fn.chanclose(state.chan)
+					state.chan = nil
+				end
+				if state.job_id then
+					vim.fn.jobstop(state.job_id)
+					state.job_id = nil
+				end
+			end,
+		})
+		vim.b[state.buf].jj_cleanup_set = true
+	end
 end
 
 --- Handle J command with subcommands and direct jj passthrough
