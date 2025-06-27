@@ -1,6 +1,6 @@
 # jj.nvim
 
-⚠️ **VERY WORK IN PROGRESS - NOT READY FOR MASSIVE USE** ⚠️
+⚠️ **WORK IN PROGRESS** ⚠️
 
 A Neovim plugin for [Jujutsu (jj)](https://github.com/jj-vcs/jj) version control system.
 
@@ -12,7 +12,8 @@ This plugin aims to be something like vim-fugitive but for piloting the jj-vcs C
 
 - Basic jj command execution through `:J` command
 - Terminal-based output display for jj commands
-- Support for common jj subcommands:
+- Support jj subcommands including your aliases through the cmdline.
+- Native lua calls for the following jj subcommands:
   - `describe` - Set change descriptions
   - `status` / `st` - Show repository status
   - `log` - Display log history with configurable options
@@ -34,20 +35,49 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 }
 ```
 
-## Usage
+## Cmdline Usage
 
 The plugin provides a `:J` command that accepts jj subcommands:
 
-```vim
+```sh
 :J status
 :J log
 :J describe "Your change description"
 :J new
+:J # This will use your defined default command
+:J <your-alias>
+```
+
+## Example config
+
+```lua
+{
+  "nicolasgb/jj.nvim",
+  config = function()
+    require("jj").setup({})
+    local cmd = require "jj.cmd"
+    vim.keymap.set("n", "<leader>jd", cmd.describe, { desc = "JJ describe" })
+    vim.keymap.set("n", "<leader>jl", cmd.log, { desc = "JJ log" })
+    vim.keymap.set("n", "<leader>je", cmd.edit, { desc = "JJ edit" })
+    vim.keymap.set("n", "<leader>jn", cmd.new, { desc = "JJ new" })
+    vim.keymap.set("n", "<leader>js", cmd.status, { desc = "JJ status" })
+    vim.keymap.set("n", "<leader>dj", cmd.diff, { desc = "JJ diff" })
+    vim.keymap.set("n", "<leader>sj", cmd.squash, { desc = "JJ squash" })
+
+    -- Some functions like `describe` or `log` can take parameters
+    vim.keymap.set("n", "<leader>jl", function()
+      cmd.log {
+        revisions = "all()",
+      }
+    end, { desc = "JJ log" })
+
+  end,
+}
+
 ```
 
 ## Requirements
 
-- Neovim >= 0.9.0
 - [Jujutsu](https://github.com/jj-vcs/jj) installed and available in PATH
 
 ## Contributing
