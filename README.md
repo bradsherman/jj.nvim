@@ -23,6 +23,7 @@ This plugin aims to be something like vim-fugitive but for piloting the jj-vcs C
   - `new` - Create a new change
   - `edit` - Edit a change
   - `squash` - Squash the current diff to it's parent
+- Picker `git status` like for [Snacks.nvim](https://github.com/folke/snacks.nvim)
 
 ## Installation
 
@@ -65,6 +66,10 @@ The plugin provides a `:J` command that accepts jj subcommands:
     vim.keymap.set("n", "<leader>js", cmd.status, { desc = "JJ status" })
     vim.keymap.set("n", "<leader>dj", cmd.diff, { desc = "JJ diff" })
     vim.keymap.set("n", "<leader>sj", cmd.squash, { desc = "JJ squash" })
+    vim.keymap.set("n", "<leader>gj", function()
+        require("jj.picker").status()
+    end, { desc = "JJ Picker status" })
+
 
     -- Some functions like `describe` or `log` can take parameters
     vim.keymap.set("n", "<leader>jl", function()
