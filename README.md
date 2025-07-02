@@ -6,7 +6,7 @@ A Neovim plugin for [Jujutsu (jj)](https://github.com/jj-vcs/jj) version control
 
 ## About
 
-This plugin aims to be something like vim-fugitive but for piloting the jj-vcs CLI. The goal is to eventually provide features similar to git status, diffs, and pickers for managing Jujutsu repositories directly from Neovim.
+This plugin aims to be something like vim-fugitive but for driving the jj-vcs CLI. The goal is to eventually provide features similar to git status, diffs, and pickers for managing Jujutsu repositories directly from Neovim.
 
 ![Demo](https://github.com/NicolasGB/jj.nvim/raw/main/assets/demo.gif)
 

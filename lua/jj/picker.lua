@@ -68,7 +68,7 @@ function M.status()
 	if M.config.snacks then
 		require("jj.picker.snacks").status(M.config, files)
 	else
-		return utils.notify("No `picker` enabled", vim.log.levels.INFO)
+		return utils.notify("No `Picker` enabled", vim.log.levels.INFO)
 	end
 end
 

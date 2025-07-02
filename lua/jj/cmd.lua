@@ -217,15 +217,51 @@ function M.status()
 	run(cmd)
 end
 
+--- @class jj.cmd.new_opts
+--- @field show_log boolean Whether or not to display the log command after creating a new
+--- @field with_input boolean Whether or not to use nvim input to decide the parent of the new commit
+--- @field args string The arguments to append to the new command
+
 --- Jujutsu new
-function M.new()
+---@param opts jj.cmd.new_opts|nil
+function M.new(opts)
 	if not utils.ensure_jj() then
 		return
 	end
 
-	local cmd = "jj new"
-	utils.execute_command(cmd, "Failed to create new")
-	utils.notify("Command `new` was succesful.", vim.log.levels.INFO)
+	---@param cmd string
+	local function execute_new(cmd)
+		utils.execute_command(cmd, "Failed to create new change")
+		utils.notify("Command `new` was succesful.", vim.log.levels.INFO)
+		-- Show the updated log if the user requested it
+		if opts and opts.show_log then
+			M.log()
+		end
+	end
+
+	-- If the user wants use input mode
+	if opts and opts.with_input then
+		if opts.show_log then
+			M.log()
+		end
+
+		vim.ui.input({
+			prompt = "Parent(s) of the new change [default: @]",
+		}, function(input)
+			if input then
+				execute_new(string.format("jj new %s", input))
+			end
+			close_terminal_buffer()
+		end)
+	else
+		-- Otherwise follow a classic flow for inputing
+		local cmd = "jj new"
+		if opts and opts.args then
+			cmd = string.format("jj new %s", opts.args)
+		end
+
+		execute_new(cmd)
+	end
 end
 
 -- Jujutsu edit
@@ -286,7 +322,7 @@ local default_log_opts = {
 	limit = 20,
 }
 --- Jujutsu log
----@param opts jj.cmd.log_opts Command options from nvim_create_user_command
+---@param opts jj.cmd.log_opts|nil Command options from nvim_create_user_command
 function M.log(opts)
 	if not utils.ensure_jj() then
 		return
@@ -359,8 +395,7 @@ function M.j(args)
 		M.edit()
 		return
 	elseif subcommand == "new" then
-		M.new()
-		M.log({})
+		M.new({ show_log = true, args = table.concat(remaining_args, " "), with_input = false })
 		return
 	end
 
@@ -394,6 +429,8 @@ function M.register_command()
 				"abandon",
 				"b",
 				"git",
+				"rebase",
+				"abandon",
 			}
 
 			local matches = {}
