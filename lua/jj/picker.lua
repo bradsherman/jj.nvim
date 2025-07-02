@@ -44,6 +44,7 @@ local function get_files()
 		local change, file_path = line:match("^(%a)%s(.+)$")
 
 		table.insert(files, {
+			text = file_path,
 			file = file_path,
 			change = change,
 			diff_cmd = string.format("jj diff %s", file_path),

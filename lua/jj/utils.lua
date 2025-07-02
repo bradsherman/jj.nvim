@@ -101,7 +101,7 @@ end
 
 ---- Notify function to display messages with a title
 --- @param message string The message to display
---- @param level number The log level (default: INFO)
+--- @param level? number The log level (default: INFO)
 function M.notify(message, level)
 	level = level or vim.log.levels.INFO
 	vim.notify(message, level, { title = "JJ", timeout = 3000 })

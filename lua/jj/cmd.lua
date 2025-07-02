@@ -37,7 +37,6 @@ local function handle_status_enter()
 
 	if renamed_file then
 		-- For renamed files, we need to construct the full path
-		-- Extract the directory part before the "{"
 		local dir_pattern = "^R (.*)/{.*}$"
 		local dir_path = line:match(dir_pattern)
 		if dir_path then
@@ -46,7 +45,7 @@ local function handle_status_enter()
 			filepath = renamed_file
 		end
 	else
-		-- jj status format: "M filename" or "A filename" or "D filename" etc.
+		-- jj status format: "M filename" or "A filename"
 		-- Match lines that start with status letter followed by space and filename
 		local pattern = "^[MA?!] (.+)$"
 		filepath = line:match(pattern)
@@ -403,13 +402,29 @@ function M.log(opts)
 	run(cmd)
 end
 
+---@class jj.cmd.diff_opts
+---@field current boolean Wether or not to only diff the current buffer
+
 --- Jujutsu diff
-function M.diff()
+--- @param opts? jj.cmd.diff_opts The options for the diff command
+function M.diff(opts)
 	if not utils.ensure_jj() then
 		return
 	end
 
 	local cmd = "jj diff"
+
+	if opts and opts.current then
+		local file = vim.fn.expand("%:p")
+		utils.notify(file)
+		if file and file ~= "" then
+			cmd = string.format("%s %s", cmd, vim.fn.fnameescape(file))
+		else
+			utils.notify("Current buffer is not a file", vim.log.levels.ERROR)
+			return
+		end
+	end
+
 	run(cmd)
 end
 
