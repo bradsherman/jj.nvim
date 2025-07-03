@@ -803,6 +803,32 @@ function M.diff(opts)
 	run(cmd)
 end
 
+
+--- Jujutsu abandon
+function M.abandon()
+	if not utils.ensure_jj() then
+		return
+	end
+
+	M.log({})
+
+	vim.ui.input({
+		prompt = "Abandon revision: ",
+		default = "@",
+	}, function(input)
+		if input then
+			local cmd = string.format("jj abandon %s", input)
+			local _, success = utils.execute_command(cmd, "Error abandoning")
+			if success then
+				utils.notify("Abandon successful.", vim.log.levels.INFO)
+				M.log({})
+			end
+		else
+			close_terminal_buffer()
+		end
+	end)
+end
+
 --- @param args string|string[] jj command arguments
 function M.j(args)
 	if not utils.ensure_jj() then
