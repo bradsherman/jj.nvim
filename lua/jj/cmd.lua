@@ -28,16 +28,35 @@ end
 --- Handle Enter key press on jj status buffer
 local function handle_status_enter()
 	local line = vim.api.nvim_get_current_line()
-	-- jj status format: "M filename" or "A filename" or "D filename" etc.
-	-- Match lines that start with status letter followed by space and filename
-	local pattern = "^[MADR?!] (.+)$"
-	local filepath = line:match(pattern)
+
+	local filepath
+
+	-- Handle renamed files: "R old_path => new_path" or "R {old_path => new_path}"
+	local rename_pattern = "^R .* => ([^}]+)}"
+	local renamed_file = line:match(rename_pattern)
+
+	if renamed_file then
+		-- For renamed files, we need to construct the full path
+		-- Extract the directory part before the "{"
+		local dir_pattern = "^R (.*)/{.*}$"
+		local dir_path = line:match(dir_pattern)
+		if dir_path then
+			filepath = dir_path .. "/" .. renamed_file
+		else
+			filepath = renamed_file
+		end
+	else
+		-- jj status format: "M filename" or "A filename" or "D filename" etc.
+		-- Match lines that start with status letter followed by space and filename
+		local pattern = "^[MA?!] (.+)$"
+		filepath = line:match(pattern)
+	end
 
 	if not filepath or filepath == "" then
 		return
 	end
 
-	local stat = vim.loop.fs_stat(filepath)
+	local stat = vim.uv.fs_stat(filepath)
 	if not stat then
 		utils.notify("File not found: " .. filepath, vim.log.levels.ERROR)
 		return
