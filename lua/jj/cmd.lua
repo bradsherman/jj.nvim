@@ -416,7 +416,6 @@ function M.diff(opts)
 
 	if opts and opts.current then
 		local file = vim.fn.expand("%:p")
-		utils.notify(file)
 		if file and file ~= "" then
 			cmd = string.format("%s %s", cmd, vim.fn.fnameescape(file))
 		else
