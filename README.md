@@ -23,7 +23,9 @@ This plugin aims to be something like vim-fugitive but for driving the jj-vcs CL
   - `new` - Create a new change
   - `edit` - Edit a change
   - `squash` - Squash the current diff to it's parent
-- Picker `git status` like for [Snacks.nvim](https://github.com/folke/snacks.nvim)
+- Picker for for [Snacks.nvim](https://github.com/folke/snacks.nvim)
+  - `jj status` Displays the current changes diffs
+  - `jj log` Displays a buffer's history changes and allows to edit it's change
 
 ## Installation
 
@@ -51,6 +53,22 @@ The plugin provides a `:J` command that accepts jj subcommands:
 :J <your-alias>
 ```
 
+## Setup config
+
+```lua
+{
+  -- Setup snacks as a picker
+  picker = {
+    -- Here you can pass the options as you would for snacks.
+    -- It will be used when using the picker
+    snacks = {
+
+    }
+  }
+}
+
+```
+
 ## Example config
 
 ```lua
@@ -66,9 +84,15 @@ The plugin provides a `:J` command that accepts jj subcommands:
     vim.keymap.set("n", "<leader>js", cmd.status, { desc = "JJ status" })
     vim.keymap.set("n", "<leader>dj", cmd.diff, { desc = "JJ diff" })
     vim.keymap.set("n", "<leader>sj", cmd.squash, { desc = "JJ squash" })
+
+    -- Pickers
     vim.keymap.set("n", "<leader>gj", function()
         require("jj.picker").status()
     end, { desc = "JJ Picker status" })
+    vim.keymap.set("n", "<leader>gl", function()
+        require("jj.picker").file_history()
+    end, { desc = "JJ Picker file history" })
+
 
 
     -- Some functions like `describe` or `log` can take parameters
@@ -95,6 +119,14 @@ The plugin provides a `:J` command that accepts jj subcommands:
 ## Contributing
 
 This is an early-stage project. Contributions are welcome, but please be aware that the API and features are likely to change significantly.
+
+## Documentation
+
+Once the plugin is more complete i'll write docs for each of the commands.
+
+## FAQ
+
+- Telescope Suport? Planned but i don't use it, it's already thought of by design, will implement it at some point or if someone submits a PR i'll accept it gladly.
 
 ## License
 
