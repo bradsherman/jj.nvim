@@ -14,6 +14,16 @@ local state = {
 	--- The current job id for the terminal buffer
 	--- @type integer|nil
 	job_id = nil,
+
+	-- The floating buffer if any
+	--- @type integer|nil
+	floating_buf = nil,
+	-- The floating channel to communciate with the terminal
+	--- @type integer|nil
+	floating_chan = nil,
+	--- The floating job id for the terminal buffer
+	--- @type integer|nil
+	floating_job_id = nil,
 }
 
 --- Close the current terminal buffer if it exists
@@ -22,6 +32,22 @@ local function close_terminal_buffer()
 		vim.cmd("bwipeout! " .. state.buf)
 	else
 		vim.cmd("close")
+	end
+end
+
+--- Close the current terminal buffer if it exists
+local function close_floating_buffer()
+	if state.buf and vim.api.nvim_buf_is_valid(state.floating_buf) then
+		vim.cmd("bwipeout! " .. state.floating_buf)
+	else
+		vim.cmd("close")
+	end
+end
+
+--- Hide the current floating window
+local function hide_floating_window()
+	if state.floating_buf and vim.api.nvim_buf_is_valid(state.floating_buf) then
+		vim.cmd("hide")
 	end
 end
 
@@ -188,8 +214,199 @@ local function handle_log_enter()
 		if not success then
 			return
 		end
+
+		utils.notify(string.format("Editing change: `%s`", revset), vim.log.levels.INFO)
 		-- Close the terminal buffer
 		close_terminal_buffer()
+	end
+end
+---
+---
+--- Create a floating window for terminal output
+--- @param config table Window configuration options
+--- @param enter boolean Whether to enter the window after creation
+--- @return integer buf Buffer number
+--- @return integer win Window number
+local function create_floating_window(config, enter)
+	local default_config = {
+		width = math.floor(vim.o.columns * 0.8),
+		height = math.floor(vim.o.lines * 0.8),
+		row = math.floor((vim.o.lines - math.floor(vim.o.lines * 0.8)) / 2),
+		col = math.floor((vim.o.columns - math.floor(vim.o.columns * 0.8)) / 2),
+		relative = "editor",
+		style = "minimal",
+		border = "rounded",
+		title = " JJ Diff ",
+		title_pos = "center",
+	}
+
+	local merged_config = vim.tbl_extend("force", default_config, config or {})
+
+	-- Create buffer
+	local buf = vim.api.nvim_create_buf(false, true)
+
+	-- Create window
+	local win = vim.api.nvim_open_win(buf, enter or false, merged_config)
+
+	-- Set buffer options
+	vim.bo[buf].bufhidden = "hide"
+
+	-- Set window options
+	vim.wo[win].wrap = true
+	vim.wo[win].number = false
+	vim.wo[win].relativenumber = false
+	vim.wo[win].cursorline = false
+	vim.wo[win].signcolumn = "no"
+
+	return buf, win
+end
+
+--- Run the command in a floating window
+--- @param cmd string The command to run in the floating window
+local function run_floating(cmd)
+	-- Clean up previous state if invalid
+	if state.floating_buf and not vim.api.nvim_buf_is_valid(state.floating_buf) then
+		state.floating_buf = nil
+		state.floating_chan = nil
+		state.floating_job_id = nil
+	end
+
+	-- Stop any running job first
+	if state.floating_job_id then
+		vim.fn.jobstop(state.floating_job_id)
+		state.floating_job_id = nil
+	end
+
+	-- Close previous channel
+	if state.floating_chan then
+		vim.fn.chanclose(state.floating_chan)
+		state.floating_chan = nil
+	end
+
+	local win, buf
+	if state.floating_buf and vim.api.nvim_buf_is_valid(state.floating_buf) then
+		-- Find or create a window for the buffer
+		local buf_wins = vim.fn.win_findbuf(state.floating_buf)
+		if #buf_wins > 0 then
+			vim.api.nvim_set_current_win(buf_wins[1])
+			win = buf_wins[1]
+		else
+			-- If the buffer is hidden create a new window and override the buffer of it
+			_, win = create_floating_window({}, true)
+			vim.api.nvim_win_set_buf(win, state.floating_buf)
+		end
+	else
+		-- Otherwise create a new buffer
+		buf, win = create_floating_window({}, true)
+		state.floating_buf = buf
+	end
+
+	-- Create new terminal channel
+	local chan = vim.api.nvim_open_term(state.floating_buf, {})
+	if not chan or chan <= 0 then
+		vim.notify("Failed to create terminal channel", vim.log.levels.ERROR)
+		return
+	end
+	state.floating_chan = chan
+
+	-- Clear terminal before running new command
+	vim.api.nvim_chan_send(chan, "\27[H\27[2J")
+
+	local jid = vim.fn.jobstart(cmd, {
+		pty = true,
+		width = vim.api.nvim_win_get_width(win),
+		height = vim.api.nvim_win_get_height(win),
+		env = {
+			TERM = "xterm-256color",
+			PAGER = "cat",
+			DELTA_PAGER = "cat",
+			COLORTERM = "truecolor",
+		},
+		on_stdout = function(_, data)
+			if not vim.api.nvim_buf_is_valid(state.floating_buf) then
+				return
+			end
+			local output = table.concat(data, "\n")
+			vim.api.nvim_chan_send(chan, output)
+		end,
+		on_exit = function(_, _)
+			vim.schedule(function()
+				if vim.api.nvim_buf_is_valid(state.floating_buf) then
+					vim.bo[state.floating_buf].modifiable = false
+					if vim.api.nvim_get_current_buf() == state.floating_buf then
+						vim.cmd("stopinsert")
+					end
+				end
+			end)
+		end,
+	})
+
+	-- Set keymaps only if they haven't been set for this buffer
+	if not vim.b[state.floating_buf].jj_keymaps_set then
+		vim.keymap.set(
+			{ "n", "v" },
+			"i",
+			function() end,
+			{ buffer = state.floating_buf, noremap = true, silent = true }
+		)
+		vim.keymap.set(
+			{ "n", "v" },
+			"c",
+			function() end,
+			{ buffer = state.floating_buf, noremap = true, silent = true }
+		)
+		vim.keymap.set(
+			{ "n", "v" },
+			"a",
+			function() end,
+			{ buffer = state.floating_buf, noremap = true, silent = true }
+		)
+		vim.keymap.set(
+			{ "n", "v" },
+			"q",
+			close_floating_buffer,
+			{ buffer = state.floating_bufbuf, noremap = true, silent = true, desc = "Close the floating buffer" }
+		)
+		vim.keymap.set(
+			{ "n" },
+			"<ESC>",
+			hide_floating_window,
+			{ buffer = state.floating_bufbuf, noremap = true, silent = true, desc = "Hide the buffer" }
+		)
+		vim.b[state.floating_buf].jj_keymaps_set = true
+	end
+
+	-- Set up cleanup autocmd only once per buffer
+	if not vim.b[state.floating_buf].jj_cleanup_set then
+		vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+			buffer = state.floating_buf,
+			callback = function()
+				if state.floating_buf and vim.api.nvim_buf_is_valid(state.floating_buf) then
+					state.floating_buf = nil
+				end
+				if state.floating_chan then
+					vim.fn.chanclose(chan)
+				end
+				if jid then
+					vim.fn.jobstop(jid)
+				end
+			end,
+		})
+		vim.b[state.floating_buf].jj_cleanup_set = true
+	end
+end
+
+--- Handle diffing a log line
+local function handle_log_diff()
+	local line = vim.api.nvim_get_current_line()
+
+	local revset = get_rev_from_log_line(line)
+
+	if revset then
+		local cmd = string.format("jj diff -r %s", revset)
+		run_floating(cmd)
+	else
+		utils.notify("No valid revision found in the log line", vim.log.levels.ERROR)
 	end
 end
 
@@ -291,16 +508,47 @@ local function run(cmd)
 		vim.keymap.set({ "n", "v" }, "i", function() end, { buffer = state.buf, noremap = true, silent = true })
 		vim.keymap.set({ "n", "v" }, "c", function() end, { buffer = state.buf, noremap = true, silent = true })
 		vim.keymap.set({ "n", "v" }, "a", function() end, { buffer = state.buf, noremap = true, silent = true })
-		vim.keymap.set({ "n", "v" }, "q", close_terminal_buffer, { buffer = state.buf, noremap = true, silent = true })
-		vim.keymap.set({ "n" }, "<ESC>", close_terminal_buffer, { buffer = state.buf, noremap = true, silent = true })
+		vim.keymap.set(
+			{ "n", "v" },
+			"q",
+			close_terminal_buffer,
+			{ buffer = state.buf, noremap = true, silent = true, desc = "Close the terminal buffer" }
+		)
+		vim.keymap.set(
+			{ "n" },
+			"<ESC>",
+			close_terminal_buffer,
+			{ buffer = state.buf, noremap = true, silent = true, desc = "Close the terminal buffer" }
+		)
 
 		-- Add Enter key mapping for status buffers to open files
 		local cmd_parts = vim.split(cmd, " ")
 		if cmd_parts[2] == "st" or cmd_parts[2] == "status" then
-			vim.keymap.set({ "n" }, "<CR>", handle_status_enter, { buffer = state.buf, noremap = true, silent = true })
-			vim.keymap.set({ "n" }, "X", handle_status_restore, { buffer = state.buf, noremap = true, silent = true })
+			vim.keymap.set(
+				{ "n" },
+				"<CR>",
+				handle_status_enter,
+				{ buffer = state.buf, noremap = true, silent = true, desc = "Open file under cursor" }
+			)
+			vim.keymap.set(
+				{ "n" },
+				"X",
+				handle_status_restore,
+				{ buffer = state.buf, noremap = true, silent = true, desc = "Restore file under cursor" }
+			)
 		elseif cmd_parts[2] == "log" then
-			vim.keymap.set({ "n" }, "<CR>", handle_log_enter, { buffer = state.buf, noremap = true, silent = true })
+			vim.keymap.set(
+				{ "n" },
+				"<CR>",
+				handle_log_enter,
+				{ buffer = state.buf, noremap = true, silent = true, desc = "Edit change under cursor" }
+			)
+			vim.keymap.set(
+				{ "n" },
+				"d",
+				handle_log_diff,
+				{ buffer = state.buf, noremap = true, silent = true, desc = "Diff change under cursor" }
+			)
 		end
 
 		vim.b[state.buf].jj_keymaps_set = true

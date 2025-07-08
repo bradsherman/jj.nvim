@@ -25,7 +25,34 @@ This plugin aims to be something like vim-fugitive but for driving the jj-vcs CL
   - `squash` - Squash the current diff to it's parent
 - Picker for for [Snacks.nvim](https://github.com/folke/snacks.nvim)
   - `jj status` Displays the current changes diffs
-  - `jj log` Displays a buffer's history changes and allows to edit it's change
+  - `jj file_history` Displays a buffer's history changes and allows to edit it's change (including immutable changes)
+
+## Enhanced integrations
+
+Here are some cool features you can do with jj.nvim
+
+### Diff any change
+
+You can diff any change in your log history by simply pressing `d` on it's line, yeah just like that!
+![Diff-from-log](https://github.com/NicolasGB/jj.nvim/raw/main/assets/diff-log.gif)
+
+### Edit mutable changes
+
+Jumping up and down your log history ?
+
+In your log ouptut press `CR` in a line to directly edit a `mutable` change.
+![Edit-from-log](https://github.com/NicolasGB/jj.nvim/raw/main/assets/edit-log.gif)
+
+### Open a changed file
+
+Just press enter to open the a file from the `status` output in your current window.
+![Open-status](https://github.com/NicolasGB/jj.nvim/raw/main/assets/enter-status.gif)
+
+### Restore a changed file
+
+Press `X` on a file from the `status` output and that's it, it's restored.
+
+![Restore-status](https://github.com/NicolasGB/jj.nvim/raw/main/assets/x-status.gif)
 
 ## Installation
 
