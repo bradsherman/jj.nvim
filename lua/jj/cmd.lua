@@ -25,36 +25,72 @@ local function close_terminal_buffer()
 	end
 end
 
---- Handle Enter key press on jj status buffer
-local function handle_status_enter()
+local function parse_file_info_from_status_line()
 	local line = vim.api.nvim_get_current_line()
 
-	local filepath
+	-- Handle renamed files: "R path/{old_name => new_name}" or "R old_path => new_path"
+	local rename_pattern_curly = "^R (.*)/{(.*) => ([^}]+)}"
+	local dir_path, old_name, new_name = line:match(rename_pattern_curly)
 
-	-- Handle renamed files: "R old_path => new_path" or "R {old_path => new_path}"
-	local rename_pattern = "^R .* => ([^}]+)}"
-	local renamed_file = line:match(rename_pattern)
-
-	if renamed_file then
-		-- For renamed files, we need to construct the full path
-		local dir_pattern = "^R (.*)/{.*}$"
-		local dir_path = line:match(dir_pattern)
-		if dir_path then
-			filepath = dir_path .. "/" .. renamed_file
-		else
-			filepath = renamed_file
-		end
+	if dir_path and old_name and new_name then
+		return {
+			old_path = dir_path .. "/" .. old_name,
+			new_path = dir_path .. "/" .. new_name,
+			is_rename = true,
+		}
 	else
+		-- Try simple rename pattern: "R old_path => new_path"
+		local rename_pattern_simple = "^R (.*) => (.+)$"
+		local old_path, new_path = line:match(rename_pattern_simple)
+		if old_path and new_path then
+			return {
+				old_path = old_path,
+				new_path = new_path,
+				is_rename = true,
+			}
+		end
+	end
+
+	-- Not a rename, try regular status patterns
+	local filepath
+	-- Handle renamed files: "R path/{old_name => new_name}" or "R old_path => new_path"
+	local rename_pattern_curly_new = "^R (.*)/{.* => ([^}]+)}"
+	local dir_path_new, renamed_file = line:match(rename_pattern_curly_new)
+
+	if dir_path_new and renamed_file then
+		filepath = dir_path_new .. "/" .. renamed_file
+	else
+		-- Try simple rename pattern: "R old_path => new_path"
+		local rename_pattern_simple_new = "^R .* => (.+)$"
+		filepath = line:match(rename_pattern_simple_new)
+	end
+
+	if not filepath then
 		-- jj status format: "M filename" or "A filename"
 		-- Match lines that start with status letter followed by space and filename
-		local pattern = "^[MA?!] (.+)$"
+		local pattern = "^[MAD?!] (.+)$"
 		filepath = line:match(pattern)
 	end
 
-	if not filepath or filepath == "" then
+	if filepath then
+		return {
+			old_path = filepath,
+			new_path = filepath,
+			is_rename = false,
+		}
+	end
+
+	return nil
+end
+
+local function handle_status_enter()
+	local file_info = parse_file_info_from_status_line()
+
+	if not file_info then
 		return
 	end
 
+	local filepath = file_info.new_path
 	local stat = vim.uv.fs_stat(filepath)
 	if not stat then
 		utils.notify("File not found: " .. filepath, vim.log.levels.ERROR)
@@ -66,6 +102,41 @@ local function handle_status_enter()
 
 	-- Open the file in that window, replacing current buffer
 	vim.cmd("edit " .. vim.fn.fnameescape(filepath))
+end
+
+local function handle_status_restore()
+	local file_info = parse_file_info_from_status_line()
+
+	if not file_info then
+		return
+	end
+
+	if file_info.is_rename then
+		-- For renamed files, remove the new file and restore the old one from parent revision
+		local rm_cmd = "rm " .. vim.fn.shellescape(file_info.new_path)
+		local restore_cmd = "jj restore --from @- " .. vim.fn.shellescape(file_info.old_path)
+
+		local _, rm_success = utils.execute_command(rm_cmd, "Failed to remove renamed file")
+		if rm_success then
+			local _, restore_success = utils.execute_command(restore_cmd, "Failed to restore original file")
+			if restore_success then
+				utils.notify(
+					"Reverted rename: " .. file_info.new_path .. " -> " .. file_info.old_path,
+					vim.log.levels.INFO
+				)
+				M.status()
+			end
+		end
+	else
+		-- For non-renamed files, use regular restore
+		local restore_cmd = "jj restore " .. vim.fn.shellescape(file_info.old_path)
+
+		local _, success = utils.execute_command(restore_cmd, "Failed to restore")
+		if success then
+			utils.notify("Restored: " .. file_info.old_path, vim.log.levels.INFO)
+			M.status()
+		end
+	end
 end
 
 --- Extract revision ID from a jujutsu log line
@@ -227,6 +298,7 @@ local function run(cmd)
 		local cmd_parts = vim.split(cmd, " ")
 		if cmd_parts[2] == "st" or cmd_parts[2] == "status" then
 			vim.keymap.set({ "n" }, "<CR>", handle_status_enter, { buffer = state.buf, noremap = true, silent = true })
+			vim.keymap.set({ "n" }, "X", handle_status_restore, { buffer = state.buf, noremap = true, silent = true })
 		elseif cmd_parts[2] == "log" then
 			vim.keymap.set({ "n" }, "<CR>", handle_log_enter, { buffer = state.buf, noremap = true, silent = true })
 		end
